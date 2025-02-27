@@ -9,7 +9,7 @@ Uma ferramenta online que transforma suas referências bibliográficas bagunçad
 
 ## 🌐 Acesse Agora
 
-**[referencias.brainin.dev.br](https://referencias.brainin.dev.br)**
+**[brainin.dev.br](brainin.dev.br)**
 
 ## ✨ Funcionalidades
 
@@ -20,7 +20,7 @@ Uma ferramenta online que transforma suas referências bibliográficas bagunçad
 
 ## 🚀 Como Usar
 
-1. Acesse [referencias.brainin.dev.br](brainin.dev.br)
+1. Acesse [brainin.dev.br](brainin.dev.br)
 2. Insira sua chave API do OpenRouter (obtenha gratuitamente em [openrouter.ai/keys](https://openrouter.ai/keys))
 3. Cole suas referências bibliográficas (uma por linha)
 4. Clique em "Processar"
