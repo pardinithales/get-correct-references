@@ -46,22 +46,24 @@
             display: grid;
             gap: 20px;
         }
-        .input-section, .results-section {
+        .input-section, .results-section, .api-key-section {
             padding: 20px;
             background: var(--gray);
             border-radius: 8px;
         }
-        textarea {
+        textarea, input[type="text"] {
             width: 100%;
-            min-height: 200px;
             padding: 15px;
             border: 1px solid #ddd;
             border-radius: 5px;
             font-size: 16px;
-            resize: vertical;
             transition: border-color 0.3s;
         }
-        textarea:focus {
+        textarea {
+            min-height: 200px;
+            resize: vertical;
+        }
+        textarea:focus, input[type="text"]:focus {
             border-color: var(--secondary);
             outline: none;
         }
@@ -160,6 +162,23 @@
             color: white;
             font-size: 14px;
         }
+        .api-info {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+        .api-info a {
+            color: var(--secondary);
+            text-decoration: none;
+        }
+        .api-info a:hover {
+            text-decoration: underline;
+        }
+        .error-message {
+            color: var(--error);
+            margin-top: 10px;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -170,6 +189,17 @@
         </header>
         
         <div class="main-content">
+            <div class="api-key-section">
+                <h2>Chave API do OpenRouter</h2>
+                <p>Insira sua chave API do OpenRouter para usar o modelo Gemini Flash Lite 2.0:</p>
+                <input type="text" id="api-key-input" placeholder="Insira sua chave API do OpenRouter">
+                <div class="api-info">
+                    <p>Não tem uma chave? <a href="https://openrouter.ai/keys" target="_blank">Obtenha uma chave gratuita no OpenRouter</a></p>
+                    <p>Este aplicativo usa o modelo <strong>google/gemini-2.0-flash-lite-preview-02-05:free</strong> através do OpenRouter.</p>
+                </div>
+                <div class="error-message" id="api-key-error">Por favor, insira uma chave API válida do OpenRouter.</div>
+            </div>
+            
             <div class="input-section">
                 <h2>Insira suas Referências</h2>
                 <textarea id="reference-input" placeholder="Cole suas referências aqui (uma por linha):
@@ -212,9 +242,22 @@ Kumar A, et al. Neuroanatomy of language. Nat Rev Neurosci. 2021;"></textarea>
         const statsDiv = document.getElementById('stats');
         const downloadButtons = document.getElementById('download-buttons');
         const resultsList = document.getElementById('results-list');
+        const apiKeyInput = document.getElementById('api-key-input');
+        const apiKeyError = document.getElementById('api-key-error');
 
         processBtn.addEventListener('click', async () => {
             const text = document.getElementById('reference-input').value.trim();
+            const apiKey = apiKeyInput.value.trim();
+            
+            // Validar entrada
+            if (!apiKey) {
+                apiKeyError.style.display = 'block';
+                apiKeyInput.focus();
+                return;
+            } else {
+                apiKeyError.style.display = 'none';
+            }
+            
             if (!text) {
                 alert('Por favor, insira pelo menos uma referência.');
                 return;
@@ -229,6 +272,7 @@ Kumar A, et al. Neuroanatomy of language. Nat Rev Neurosci. 2021;"></textarea>
             try {
                 const formData = new FormData();
                 formData.append('text', text);
+                formData.append('api_key', apiKey);
 
                 let progress = 0;
                 const fakeProgress = setInterval(() => {
@@ -243,7 +287,10 @@ Kumar A, et al. Neuroanatomy of language. Nat Rev Neurosci. 2021;"></textarea>
                 });
 
                 clearInterval(fakeProgress);
-                if (!response.ok) throw new Error('Erro na API');
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Erro na API');
+                }
 
                 const data = await response.json();
                 progressBar.style.width = '100%';
@@ -286,6 +333,15 @@ Kumar A, et al. Neuroanatomy of language. Nat Rev Neurosci. 2021;"></textarea>
             } finally {
                 loading.style.display = 'none';
             }
+        });
+        
+        // Salvar a chave API no localStorage para conveniência do usuário
+        if (localStorage.getItem('openrouter_api_key')) {
+            apiKeyInput.value = localStorage.getItem('openrouter_api_key');
+        }
+        
+        apiKeyInput.addEventListener('change', () => {
+            localStorage.setItem('openrouter_api_key', apiKeyInput.value.trim());
         });
     </script>
 </body>

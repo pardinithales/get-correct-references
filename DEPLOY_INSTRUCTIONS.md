@@ -24,17 +24,14 @@ Siga estes passos para fazer o deploy do Processador de Referências Acadêmicas
    - Output Directory: Deixe em branco
    - Install Command: `pip install -r requirements.txt`
 
-5. Expanda a seção "Environment Variables" e adicione:
-   - Nome: `GEMINI_API_KEY`
-   - Valor: Sua chave API do Gemini (obtenha em [ai.google.dev](https://ai.google.dev))
-
-6. Clique em "Deploy"
+5. Clique em "Deploy"
 
 ## 3. Verificação do Deploy
 
 1. Após o deploy ser concluído, a Vercel fornecerá uma URL para acessar sua aplicação
 2. Acesse a URL e verifique se a aplicação está funcionando corretamente
-3. Teste o processamento de algumas referências acadêmicas
+3. Insira sua chave API do OpenRouter (obtenha em [openrouter.ai/keys](https://openrouter.ai/keys))
+4. Teste o processamento de algumas referências acadêmicas
 
 ## 4. Configurações Adicionais (Opcional)
 
@@ -47,7 +44,7 @@ Siga estes passos para fazer o deploy do Processador de Referências Acadêmicas
 Se encontrar problemas durante o deploy:
 
 1. Verifique os logs de build e função na interface da Vercel
-2. Certifique-se de que a chave API do Gemini está correta
+2. Certifique-se de que está usando uma chave API válida do OpenRouter
 3. Verifique se todos os arquivos necessários estão no repositório
 4. Verifique se a estrutura de diretórios está correta
 

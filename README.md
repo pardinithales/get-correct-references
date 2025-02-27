@@ -1,6 +1,6 @@
-# Processador de Referências Acadêmicas com Gemini AI
+# Processador de Referências Acadêmicas com OpenRouter
 
-Este projeto é uma aplicação web que utiliza a API Gemini da Google para processar e extrair informações estruturadas de referências acadêmicas.
+Este projeto é uma aplicação web que utiliza o modelo Gemini Flash Lite 2.0 através do OpenRouter para processar e extrair informações estruturadas de referências acadêmicas.
 
 ## Funcionalidades
 
@@ -13,7 +13,7 @@ Este projeto é uma aplicação web que utiliza a API Gemini da Google para proc
 
 - Python 3.9+
 - Flask (Framework web)
-- Google Generative AI (Gemini API)
+- OpenRouter API (Acesso ao modelo Gemini Flash Lite 2.0)
 - HTML/CSS/JavaScript (Frontend)
 
 ## Configuração para Desenvolvimento Local
@@ -23,14 +23,12 @@ Este projeto é uma aplicação web que utiliza a API Gemini da Google para proc
    ```
    pip install -r requirements.txt
    ```
-3. Crie um arquivo `.env` na raiz do projeto com sua chave API do Gemini:
-   ```
-   GEMINI_API_KEY=sua_chave_api_aqui
-   ```
-4. Execute a aplicação:
+3. Execute a aplicação:
    ```
    python api/index.py
    ```
+4. Acesse a aplicação em seu navegador em `http://localhost:5000`
+5. Insira sua chave API do OpenRouter (obtenha em [openrouter.ai/keys](https://openrouter.ai/keys))
 
 ## Deploy na Vercel
 
@@ -38,8 +36,18 @@ Este projeto está configurado para ser facilmente implantado na Vercel:
 
 1. Faça fork deste repositório
 2. Conecte o repositório à sua conta Vercel
-3. Configure a variável de ambiente `GEMINI_API_KEY` nas configurações do projeto na Vercel
-4. Implante!
+3. Implante!
+
+## Sobre o OpenRouter e Gemini Flash Lite 2.0
+
+Este aplicativo utiliza o modelo `google/gemini-2.0-flash-lite-preview-02-05:free` através do OpenRouter. Este modelo oferece:
+
+- Contexto de 1 milhão de tokens
+- Tempo de resposta rápido
+- Alta qualidade de processamento de texto
+- Uso gratuito (sujeito a limites de taxa)
+
+Os usuários precisam fornecer sua própria chave API do OpenRouter para usar o aplicativo.
 
 ## Estrutura do Projeto
 

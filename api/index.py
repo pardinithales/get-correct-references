@@ -5,10 +5,10 @@ import logging
 import datetime
 import re
 import time
+import requests
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from flask import Flask, render_template, request, jsonify, send_file
-import google.generativeai as genai
 from dotenv import load_dotenv
 
 # Configuração de logging robusta
@@ -51,12 +51,69 @@ logger = RequestLoggerAdapter(logging.getLogger("EnhancedGeminiApp"), {})
 @lru_cache()
 def load_environment():
     load_dotenv()
-    return os.environ.get("GEMINI_API_KEY")
+    return {
+        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY"),
+        "SITE_URL": os.environ.get("SITE_URL", "https://reference-processor.vercel.app"),
+        "SITE_NAME": os.environ.get("SITE_NAME", "Processador de Referências Acadêmicas")
+    }
 
-GEMINI_API_KEY = load_environment()
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    logger.info("API Gemini initialized", extra={'request_id': 'SYSTEM_INIT'})
+# Função para fazer requisições ao OpenRouter
+def openrouter_request(prompt, api_key, request_id):
+    """
+    Faz uma requisição para o OpenRouter usando o modelo Gemini Flash Lite 2.0
+    
+    Args:
+        prompt (str): O prompt a ser enviado
+        api_key (str): Chave API do OpenRouter
+        request_id (str): ID da requisição para logging
+        
+    Returns:
+        dict: Resposta da API ou None em caso de erro
+    """
+    logger.info("Enviando requisição para OpenRouter", extra={'request_id': request_id})
+    
+    try:
+        env = load_environment()
+        site_url = env["SITE_URL"]
+        site_name = env["SITE_NAME"]
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": site_url,
+            "X-Title": site_name
+        }
+        
+        data = {
+            "model": "google/gemini-2.0-flash-lite-preview-02-05:free",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": 0.1,
+            "max_tokens": 2048
+        }
+        
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            data=json.dumps(data)
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"Erro na API do OpenRouter: {response.status_code} - {response.text}", 
+                        extra={'request_id': request_id})
+            return None
+        
+        result = response.json()
+        return result
+    
+    except Exception as e:
+        logger.error(f"Erro ao fazer requisição para OpenRouter: {str(e)}", 
+                    extra={'request_id': request_id})
+        return None
 
 app = Flask(__name__)
 
@@ -96,12 +153,11 @@ Rules:
 - Status: "found" or "not_found"
 - Confidence: 0-1 float"""
 
-    def process_single_reference(self, reference, request_id):
+    def process_single_reference(self, reference, request_id, api_key):
         if not reference.strip():
             return {"status": "not_found", "error": "Empty reference"}
         
         prompt = self.get_optimized_prompt(reference)
-        model = genai.GenerativeModel('gemini-1.5-flash')
         
         for attempt in range(1, self.max_retries + 1):
             try:
@@ -109,27 +165,24 @@ Rules:
                 self.logger.info(f"Processing attempt {attempt}/{self.max_retries}", 
                                extra={'request_id': request_id})
                 
-                response = model.generate_content(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=0.1,
-                        max_output_tokens=2048,
-                        response_mime_type="application/json"
-                    )
-                )
+                # Usar OpenRouter em vez da API Gemini direta
+                response = openrouter_request(prompt, api_key, request_id)
                 
                 elapsed = time.perf_counter() - start_time
                 self.logger.info(f"API response received in {elapsed:.2f}s",
                                extra={'request_id': request_id})
                 
-                result = extract_json_from_text(response.text)
-                if result:
-                    result["original_reference"] = reference
-                    if result.get("doi") and not result.get("url"):
-                        result["url"] = f"https://doi.org/{result['doi']}"
-                    self.logger.info(f"Successfully processed: {result.get('title', 'N/A')[:50]}",
-                                   extra={'request_id': request_id})
-                    return result
+                if response and 'choices' in response and len(response['choices']) > 0:
+                    content = response['choices'][0]['message']['content']
+                    result = extract_json_from_text(content)
+                    
+                    if result:
+                        result["original_reference"] = reference
+                        if result.get("doi") and not result.get("url"):
+                            result["url"] = f"https://doi.org/{result['doi']}"
+                        self.logger.info(f"Successfully processed: {result.get('title', 'N/A')[:50]}",
+                                      extra={'request_id': request_id})
+                        return result
                 
                 if attempt < self.max_retries:
                     time.sleep(self.retry_delay)
@@ -142,16 +195,26 @@ Rules:
         
         return {"status": "not_found", "error": "All attempts failed"}
 
-    def process_references(self, references_list, request_id):
+    def process_references(self, references_list, request_id, api_key):
         self.logger.info(f"Starting to process {len(references_list)} references",
                         extra={'request_id': request_id})
         
         start_time = time.perf_counter()
+        
+        # Modificar para passar a API key para cada processamento
+        results = []
         with ThreadPoolExecutor(max_workers=4) as executor:
-            results = list(executor.map(
-                lambda ref: self.process_single_reference(ref, request_id),
-                [ref for ref in references_list if ref.strip()]
-            ))
+            # Criar uma lista de futures
+            futures = []
+            for ref in references_list:
+                if ref.strip():
+                    futures.append(
+                        executor.submit(self.process_single_reference, ref, request_id, api_key)
+                    )
+            
+            # Coletar resultados
+            for future in futures:
+                results.append(future.result())
         
         elapsed = time.perf_counter() - start_time
         found_count = sum(1 for r in results if r.get("status") == "found")
@@ -227,16 +290,19 @@ def process():
     
     # Tentar obter texto da requisição de diferentes formas
     text = None
+    api_key = None
     
     # Verificar se os dados vieram como form-data
     if request.form:
         text = request.form.get('text', '')
+        api_key = request.form.get('api_key', '')
         logger.info("Dados recebidos via form-data", extra={'request_id': request_id})
     
     # Se não encontrou no form, verificar se veio como JSON
     if not text and request.is_json:
         data = request.get_json()
         text = data.get('text', '')
+        api_key = data.get('api_key', '')
         logger.info("Dados recebidos via JSON", extra={'request_id': request_id})
     
     # Se ainda não encontrou, tentar ler os dados brutos
@@ -244,6 +310,7 @@ def process():
         try:
             data = json.loads(request.data.decode('utf-8'))
             text = data.get('text', '')
+            api_key = data.get('api_key', '')
             logger.info("Dados recebidos via request.data", extra={'request_id': request_id})
         except:
             logger.warning("Falha ao decodificar dados brutos como JSON", extra={'request_id': request_id})
@@ -257,6 +324,11 @@ def process():
         logger.warning("Nenhum texto fornecido na requisição", extra={'request_id': request_id})
         return jsonify({'error': 'Nenhum texto fornecido'}), 400
     
+    # Verificar se a chave API foi fornecida
+    if not api_key:
+        logger.warning("Chave API do OpenRouter não fornecida", extra={'request_id': request_id})
+        return jsonify({'error': 'Chave API do OpenRouter não fornecida. Por favor, forneça sua chave API.'}), 400
+    
     logger.info(f"Texto recebido: {text[:100]}{'...' if len(text) > 100 else ''}", 
                extra={'request_id': request_id})
     
@@ -269,7 +341,7 @@ def process():
     
     try:
         start_time = time.perf_counter()
-        results = processor.process_references(references, request_id)
+        results = processor.process_references(references, request_id, api_key)
         
         json_path = processor.save_json(results, os.path.join(temp_dir, 'references.json'))
         processor.generate_ris(results, os.path.join(temp_dir, 'references.ris'))
