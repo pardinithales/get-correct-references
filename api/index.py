@@ -1,51 +1,29 @@
 import os
 import json
-import tempfile
+import base64
 import logging
 import datetime
 import re
 import time
 import requests
-from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, Response
 from dotenv import load_dotenv
+from io import StringIO
 
-# Configuração de logging para ambiente serverless
+# Configuração de logging simples para ambiente serverless
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s - [RequestID:%(request_id)s]',
-    handlers=[
-        logging.StreamHandler()
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
 )
-
-# Formatter personalizado que lida com request_id opcional
-class CustomFormatter(logging.Formatter):
-    def format(self, record):
-        if not hasattr(record, 'request_id'):
-            record.request_id = 'N/A'  # Valor padrão se request_id não estiver presente
-        return super().format(record)
-
-# Aplicar o formatter personalizado
-for handler in logging.getLogger().handlers:
-    handler.setFormatter(CustomFormatter(
-        '%(asctime)s - %(levelname)s - %(message)s - [RequestID:%(request_id)s]'
-    ))
-
-class RequestLoggerAdapter(logging.LoggerAdapter):
-    def process(self, msg, kwargs):
-        request_id = kwargs.pop('extra', {}).get('request_id', 'N/A')
-        return msg, {'extra': {'request_id': request_id}}
-
-logger = RequestLoggerAdapter(logging.getLogger("EnhancedGeminiApp"), {})
+logger = logging.getLogger("ReferenceProcessor")
 
 # Carregar variáveis de ambiente com cache
 @lru_cache()
 def load_environment():
     load_dotenv()
     return {
-        "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY"),
         "SITE_URL": os.environ.get("SITE_URL", "https://reference-processor.vercel.app"),
         "SITE_NAME": os.environ.get("SITE_NAME", "Processador de Referências Acadêmicas")
     }
@@ -54,16 +32,8 @@ def load_environment():
 def openrouter_request(prompt, api_key, request_id):
     """
     Faz uma requisição para o OpenRouter usando o modelo Gemini Flash Lite 2.0
-    
-    Args:
-        prompt (str): O prompt a ser enviado
-        api_key (str): Chave API do OpenRouter
-        request_id (str): ID da requisição para logging
-        
-    Returns:
-        dict: Resposta da API ou None em caso de erro
     """
-    logger.info("Enviando requisição para OpenRouter", extra={'request_id': request_id})
+    logger.info(f"[{request_id}] Enviando requisição para OpenRouter")
     
     try:
         env = load_environment()
@@ -96,22 +66,20 @@ def openrouter_request(prompt, api_key, request_id):
         )
         
         if response.status_code != 200:
-            logger.error(f"Erro na API do OpenRouter: {response.status_code} - {response.text}", 
-                        extra={'request_id': request_id})
+            logger.error(f"[{request_id}] Erro na API do OpenRouter: {response.status_code} - {response.text}")
             return None
         
         result = response.json()
         return result
     
     except Exception as e:
-        logger.error(f"Erro ao fazer requisição para OpenRouter: {str(e)}", 
-                    extra={'request_id': request_id})
+        logger.error(f"[{request_id}] Erro ao fazer requisição para OpenRouter: {str(e)}")
         return None
 
 app = Flask(__name__)
 
-@lru_cache(maxsize=1000)
 def extract_json_from_text(text):
+    """Extrai JSON de texto que pode conter delimitadores de código"""
     if not text:
         return None
     patterns = [
@@ -128,13 +96,11 @@ def extract_json_from_text(text):
                 continue
     return None
 
-class EnhancedGeminiProcessor:
+class ReferenceProcessor:
     def __init__(self, max_retries=2, retry_delay=1):
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        self.logger = RequestLoggerAdapter(logging.getLogger("GeminiProcessor"), {})
 
-    @lru_cache(maxsize=500)
     def get_optimized_prompt(self, reference):
         return f"""[Request: Extract reference data]
 Input: "{reference}"
@@ -148,22 +114,19 @@ Rules:
 
     def process_single_reference(self, reference, request_id, api_key):
         if not reference.strip():
-            return {"status": "not_found", "error": "Empty reference"}
+            return {"status": "not_found", "error": "Empty reference", "original_reference": reference}
         
         prompt = self.get_optimized_prompt(reference)
         
         for attempt in range(1, self.max_retries + 1):
             try:
                 start_time = time.perf_counter()
-                self.logger.info(f"Processing attempt {attempt}/{self.max_retries}", 
-                               extra={'request_id': request_id})
+                logger.info(f"[{request_id}] Processing attempt {attempt}/{self.max_retries}")
                 
-                # Usar OpenRouter em vez da API Gemini direta
                 response = openrouter_request(prompt, api_key, request_id)
                 
                 elapsed = time.perf_counter() - start_time
-                self.logger.info(f"API response received in {elapsed:.2f}s",
-                               extra={'request_id': request_id})
+                logger.info(f"[{request_id}] API response received in {elapsed:.2f}s")
                 
                 if response and 'choices' in response and len(response['choices']) > 0:
                     content = response['choices'][0]['message']['content']
@@ -173,102 +136,92 @@ Rules:
                         result["original_reference"] = reference
                         if result.get("doi") and not result.get("url"):
                             result["url"] = f"https://doi.org/{result['doi']}"
-                        self.logger.info(f"Successfully processed: {result.get('title', 'N/A')[:50]}",
-                                      extra={'request_id': request_id})
+                        logger.info(f"[{request_id}] Successfully processed reference")
                         return result
                 
                 if attempt < self.max_retries:
                     time.sleep(self.retry_delay)
             
             except Exception as e:
-                self.logger.error(f"Attempt {attempt} failed: {str(e)}",
-                                extra={'request_id': request_id})
+                logger.error(f"[{request_id}] Attempt {attempt} failed: {str(e)}")
                 if attempt < self.max_retries:
                     time.sleep(self.retry_delay)
         
-        return {"status": "not_found", "error": "All attempts failed"}
+        return {
+            "status": "not_found", 
+            "error": "All attempts failed", 
+            "original_reference": reference
+        }
 
     def process_references(self, references_list, request_id, api_key):
-        self.logger.info(f"Starting to process {len(references_list)} references",
-                        extra={'request_id': request_id})
+        logger.info(f"[{request_id}] Processing {len(references_list)} references")
         
         start_time = time.perf_counter()
         
-        # Modificar para passar a API key para cada processamento
+        # Processar sequencialmente para evitar problemas com concorrência na Vercel
         results = []
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            # Criar uma lista de futures
-            futures = []
-            for ref in references_list:
-                if ref.strip():
-                    futures.append(
-                        executor.submit(self.process_single_reference, ref, request_id, api_key)
-                    )
-            
-            # Coletar resultados
-            for future in futures:
-                results.append(future.result())
+        for i, ref in enumerate(references_list):
+            if ref.strip():
+                logger.info(f"[{request_id}] Processing reference {i+1}/{len(references_list)}")
+                result = self.process_single_reference(ref, request_id, api_key)
+                results.append(result)
         
         elapsed = time.perf_counter() - start_time
         found_count = sum(1 for r in results if r.get("status") == "found")
-        self.logger.info(f"Completed in {elapsed:.2f}s - Found: {found_count}/{len(results)}",
-                        extra={'request_id': request_id})
+        logger.info(f"[{request_id}] Completed in {elapsed:.2f}s - Found: {found_count}/{len(results)}")
         
-        return results
+        return results, elapsed
 
-    def save_json(self, data, output_file):
-        start_time = time.perf_counter()
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        self.logger.info(f"JSON saved in {time.perf_counter() - start_time:.2f}s",
-                        extra={'request_id': 'FILE_OP'})
-        return output_file
+    def generate_json_data(self, data):
+        return json.dumps(data, ensure_ascii=False, indent=2)
 
-    def generate_ris(self, data, output_file):
-        start_time = time.perf_counter()
-        with open(output_file, 'w', encoding='utf-8') as f:
-            for item in data:
-                if item.get("status") == "found":
-                    f.write("TY  - JOUR\n")
-                    if item.get("authors"):
-                        authors = item["authors"]
-                        if isinstance(authors, list):
-                            for author in authors:
-                                f.write(f"AU  - {author}\n")
-                        elif isinstance(authors, str):
-                            f.write(f"AU  - {authors}\n")
-                    for key, tag in [("title", "TI"), ("year", "PY"), ("journal", "JO"), 
-                                   ("volume", "VL"), ("issue", "IS"), ("pages", "SP"), 
-                                   ("doi", "DO"), ("url", "UR"), ("original_reference", "N1")]:
-                        if item.get(key):
-                            f.write(f"{tag}  - {item[key]}\n")
-                    f.write("ER  - \n\n")
-                else:
-                    f.write("TY  - JOUR\n")
-                    f.write(f"N1  - [NOT_FOUND] {item.get('original_reference', '')}\n")
-                    if item.get("error"):
-                        f.write(f"N1  - Error: {item['error']}\n")
-                    f.write("ER  - \n\n")
-        elapsed = time.perf_counter() - start_time
-        self.logger.info(f"RIS saved in {elapsed:.2f}s", extra={'request_id': 'FILE_OP'})
-        return output_file
+    def generate_ris_data(self, data):
+        output = []
+        for item in data:
+            if item.get("status") == "found":
+                lines = ["TY  - JOUR"]
+                if item.get("authors"):
+                    authors = item["authors"]
+                    if isinstance(authors, list):
+                        for author in authors:
+                            lines.append(f"AU  - {author}")
+                    elif isinstance(authors, str):
+                        lines.append(f"AU  - {authors}")
+                
+                for key, tag in [("title", "TI"), ("year", "PY"), ("journal", "JO"), 
+                               ("volume", "VL"), ("issue", "IS"), ("pages", "SP"), 
+                               ("doi", "DO"), ("url", "UR"), ("original_reference", "N1")]:
+                    if item.get(key):
+                        lines.append(f"{tag}  - {item[key]}")
+                
+                lines.append("ER  - \n")
+            else:
+                lines = ["TY  - JOUR"]
+                lines.append(f"N1  - [NOT_FOUND] {item.get('original_reference', '')}")
+                if item.get("error"):
+                    lines.append(f"N1  - Error: {item['error']}")
+                lines.append("ER  - \n")
+            
+            output.append("\n".join(lines))
+        
+        return "\n".join(output)
 
-    def generate_csv(self, data, output_file):
+    def generate_csv_data(self, data):
         import csv
-        start_time = time.perf_counter()
-        with open(output_file, 'w', encoding='utf-8', newline='') as f:
-            fieldnames = ['status', 'title', 'authors', 'year', 'journal', 'volume', 'issue', 
-                         'pages', 'doi', 'url', 'confidence', 'original_reference']
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            for item in data:
-                row = {field: item.get(field, '') for field in fieldnames}
-                if isinstance(row['authors'], list):
-                    row['authors'] = '; '.join(str(author) for author in row['authors'])
-                writer.writerow(row)
-        elapsed = time.perf_counter() - start_time
-        self.logger.info(f"CSV saved in {elapsed:.2f}s", extra={'request_id': 'FILE_OP'})
-        return output_file
+        output = StringIO()
+        fieldnames = ['status', 'title', 'authors', 'year', 'journal', 'volume', 'issue', 
+                     'pages', 'doi', 'url', 'confidence', 'original_reference']
+        
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        
+        for item in data:
+            row = {field: item.get(field, '') for field in fieldnames}
+            if isinstance(row['authors'], list):
+                row['authors'] = '; '.join(str(author) for author in row['authors'])
+            writer.writerow(row)
+        
+        return output.getvalue()
 
 @app.route('/')
 def index():
@@ -277,8 +230,7 @@ def index():
 @app.route('/process', methods=['POST'])
 def process():
     request_id = f"REQ_{int(time.time()*1000)}"
-    logger.info(f"New request received - Input size: {len(request.data)} bytes",
-                extra={'request_id': request_id})
+    logger.info(f"[{request_id}] New request received")
     
     # Tentar obter texto da requisição de diferentes formas
     text = None
@@ -288,14 +240,14 @@ def process():
     if request.form:
         text = request.form.get('text', '')
         api_key = request.form.get('api_key', '')
-        logger.info("Dados recebidos via form-data", extra={'request_id': request_id})
+        logger.info(f"[{request_id}] Dados recebidos via form-data")
     
     # Se não encontrou no form, verificar se veio como JSON
     if not text and request.is_json:
         data = request.get_json()
         text = data.get('text', '')
         api_key = data.get('api_key', '')
-        logger.info("Dados recebidos via JSON", extra={'request_id': request_id})
+        logger.info(f"[{request_id}] Dados recebidos via JSON")
     
     # Se ainda não encontrou, tentar ler os dados brutos
     if not text and request.data:
@@ -303,43 +255,42 @@ def process():
             data = json.loads(request.data.decode('utf-8'))
             text = data.get('text', '')
             api_key = data.get('api_key', '')
-            logger.info("Dados recebidos via request.data", extra={'request_id': request_id})
+            logger.info(f"[{request_id}] Dados recebidos via request.data")
         except:
-            logger.warning("Falha ao decodificar dados brutos como JSON", extra={'request_id': request_id})
-    
-    # Registrar detalhes da requisição para diagnóstico
-    logger.info(f"Headers: {dict(request.headers)}", extra={'request_id': request_id})
-    logger.info(f"Content-Type: {request.content_type}", extra={'request_id': request_id})
-    logger.info(f"Dados recebidos: {request.data[:200]}", extra={'request_id': request_id})
+            logger.warning(f"[{request_id}] Falha ao decodificar dados brutos como JSON")
     
     if not text:
-        logger.warning("Nenhum texto fornecido na requisição", extra={'request_id': request_id})
+        logger.warning(f"[{request_id}] Nenhum texto fornecido na requisição")
         return jsonify({'error': 'Nenhum texto fornecido'}), 400
     
     # Verificar se a chave API foi fornecida
     if not api_key:
-        logger.warning("Chave API do OpenRouter não fornecida", extra={'request_id': request_id})
+        logger.warning(f"[{request_id}] Chave API do OpenRouter não fornecida")
         return jsonify({'error': 'Chave API do OpenRouter não fornecida. Por favor, forneça sua chave API.'}), 400
     
-    logger.info(f"Texto recebido: {text[:100]}{'...' if len(text) > 100 else ''}", 
-               extra={'request_id': request_id})
+    logger.info(f"[{request_id}] Texto recebido com {len(text)} caracteres")
     
     references = [line.strip() for line in text.split('\n') if line.strip()]
-    logger.info(f"Parsed {len(references)} references from input",
-                extra={'request_id': request_id})
+    logger.info(f"[{request_id}] Parsed {len(references)} references from input")
     
-    temp_dir = tempfile.mkdtemp()
-    processor = EnhancedGeminiProcessor()
+    processor = ReferenceProcessor()
     
     try:
-        start_time = time.perf_counter()
-        results = processor.process_references(references, request_id, api_key)
+        # Processar referências
+        results, processing_time = processor.process_references(references, request_id, api_key)
         
-        json_path = processor.save_json(results, os.path.join(temp_dir, 'references.json'))
-        processor.generate_ris(results, os.path.join(temp_dir, 'references.ris'))
-        processor.generate_csv(results, os.path.join(temp_dir, 'references.csv'))
+        # Gerar dados em memória em vez de arquivos
+        json_data = processor.generate_json_data(results)
+        ris_data = processor.generate_ris_data(results)
+        csv_data = processor.generate_csv_data(results)
         
-        elapsed = time.perf_counter() - start_time
+        # Codificar dados para download
+        encoded_data = {
+            'json': base64.b64encode(json_data.encode('utf-8')).decode('utf-8'),
+            'ris': base64.b64encode(ris_data.encode('utf-8')).decode('utf-8'),
+            'csv': base64.b64encode(csv_data.encode('utf-8')).decode('utf-8')
+        }
+        
         found_count = sum(1 for r in results if r.get("status") == "found")
         
         response = {
@@ -347,43 +298,55 @@ def process():
             'found': found_count,
             'not_found': len(results) - found_count,
             'results': results,
-            'temp_dir': temp_dir,
-            'processing_time': f"{elapsed:.2f}s"
+            'encoded_data': encoded_data,
+            'processing_time': f"{processing_time:.2f}s"
         }
         
-        logger.info(f"Request completed - Total: {len(results)}, Found: {found_count}, Time: {elapsed:.2f}s",
-                   extra={'request_id': request_id})
+        logger.info(f"[{request_id}] Request completed - Total: {len(results)}, Found: {found_count}, Time: {processing_time:.2f}s")
         return jsonify(response)
     
     except Exception as e:
-        logger.error(f"Processing failed: {str(e)}", extra={'request_id': request_id})
+        logger.error(f"[{request_id}] Processing failed: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/download/<format_type>')
 def download(format_type):
     request_id = f"DL_{int(time.time()*1000)}"
-    temp_dir = request.args.get('temp_dir')
-    logger.info(f"Download requested - Format: {format_type}", extra={'request_id': request_id})
+    logger.info(f"[{request_id}] Download requested - Format: {format_type}")
     
-    if not temp_dir or not os.path.exists(temp_dir):
-        logger.error("Temp directory not found", extra={'request_id': request_id})
-        return jsonify({'error': 'Temporary directory not found'}), 404
+    encoded_data = request.args.get('data')
+    if not encoded_data:
+        logger.error(f"[{request_id}] No encoded data provided")
+        return jsonify({'error': 'No data provided'}), 400
     
-    file_map = {
-        'json': ('references.json', 'application/json'),
-        'ris': ('references.ris', 'application/x-research-info-systems'),
-        'csv': ('references.csv', 'text/csv')
-    }
-    
-    if format_type in file_map:
-        file_path = os.path.join(temp_dir, file_map[format_type][0])
-        logger.info(f"Sending file: {file_path}", extra={'request_id': request_id})
-        return send_file(file_path, as_attachment=True, 
-                        download_name=file_map[format_type][0], 
-                        mimetype=file_map[format_type][1])
-    else:
-        logger.warning(f"Unsupported format: {format_type}", extra={'request_id': request_id})
-        return jsonify({'error': 'Unsupported format'}), 400
+    try:
+        # Decodificar dados
+        decoded_data = base64.b64decode(encoded_data).decode('utf-8')
+        
+        # Configurar tipo de conteúdo e nome do arquivo
+        content_types = {
+            'json': ('application/json', 'references.json'),
+            'ris': ('application/x-research-info-systems', 'references.ris'),
+            'csv': ('text/csv', 'references.csv')
+        }
+        
+        if format_type not in content_types:
+            logger.warning(f"[{request_id}] Unsupported format: {format_type}")
+            return jsonify({'error': 'Unsupported format'}), 400
+        
+        # Criar resposta com os dados
+        content_type, filename = content_types[format_type]
+        
+        response = Response(decoded_data)
+        response.headers['Content-Type'] = content_type
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        logger.info(f"[{request_id}] Sending {format_type} file")
+        return response
+        
+    except Exception as e:
+        logger.error(f"[{request_id}] Download failed: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 # Definir a pasta de templates para o Flask
 app.template_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')

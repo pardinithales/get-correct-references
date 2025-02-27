@@ -303,11 +303,13 @@ Kumar A, et al. Neuroanatomy of language. Nat Rev Neurosci. 2021;"></textarea>
                     <div><strong>Sucesso:</strong> ${Math.round((data.found / data.total) * 100)}%</div>
                 `;
 
-                ['json', 'ris', 'csv'].forEach(fmt => {
-                    document.getElementById(`${fmt}-download`).href = 
-                        `/download/${fmt}?temp_dir=${encodeURIComponent(data.temp_dir)}`;
-                });
-                downloadButtons.style.display = 'flex';
+                if (data.encoded_data) {
+                    ['json', 'ris', 'csv'].forEach(fmt => {
+                        document.getElementById(`${fmt}-download`).href = 
+                            `/download/${fmt}?data=${encodeURIComponent(data.encoded_data[fmt])}`;
+                    });
+                    downloadButtons.style.display = 'flex';
+                }
 
                 resultsList.innerHTML = '';
                 data.results.forEach((result, i) => {
