@@ -69,9 +69,6 @@ Este aplicativo utiliza o modelo **Gemini Flash Lite 2.0** da Google através do
 
 Consulte [DEPLOY_INSTRUCTIONS.md](DEPLOY_INSTRUCTIONS.md) para instruções detalhadas.
 
-## 📝 Licença
-
-MIT
 
 ## 👤 Autor
 
@@ -83,3 +80,5 @@ Desenvolvido por Thales Pardini Fagundes
 
 ⭐ Dê uma estrela no [repositório GitHub](https://github.com/thales-pardini/get-correct-references)  
 🐛 Encontrou um bug? [Abra uma issue](https://github.com/thales-pardini/get-correct-references/issues) 
+Instagram: @thalespardinifagundes
+X: thales_pardini
