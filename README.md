@@ -1,12 +1,13 @@
 # Processador de Referências Acadêmicas
 
 ![Versão](https://img.shields.io/badge/versão-1.0-blue)
-![Licença](https://img.shields.io/badge/licença-MIT-green)
 
-## 📚 O que é?
 
-Uma ferramenta online que transforma suas referências bibliográficas bagunçadas em dados estruturados e organizados. Ideal para estudantes, pesquisadores e acadêmicos que precisam organizar suas bibliografias.
+Descrição em Português (PT-BR)
+Este aplicativo incrível processa referências acadêmicas de graça! Cole sua lista de referências — mesmo as mais caóticas — e ele gera arquivos RIS, CSV e JSON com metadados perfeitos. Totalmente gratuito, usa um modelo da Open Router Free para analisar cada citação, extraindo autores, título, ano, DOI e mais, com retries automáticos para confiabilidade total. Consulta a CrossRef para enriquecer os dados, corrigindo falhas e adicionando URLs e DOIs verificados. Ideal para pesquisadores, elimina erros em manuscritos e entrega referências prontas para Zotero, Mendeley ou submissões. Salva tudo em uma pasta personalizável com logs detalhados!
 
+Descrição em Inglês (EN)
+This fantastic app processes academic references for free! Paste your reference list — even the wildest ones — and it generates RIS, CSV, and JSON files with spot-on metadata. Completely free thanks to an Open Router Free model, it parses each citation, pulling out authors, title, year, DOI, and more, with automatic retries for total reliability. It queries CrossRef to boost the data, fixing gaps and adding verified URLs and DOIs. Perfect for researchers, it wipes out manuscript errors, producing references ready for Zotero, Mendeley, or submissions. Everything’s saved in a customizable folder with detailed logs!
 ## 🌐 Acesse Agora
 
 **[referencias.brainin.dev.br](https://brainin.dev.br)**
