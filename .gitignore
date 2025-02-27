@@ -1,0 +1,38 @@
+# Arquivos de ambiente
+.env
+
+# Diretórios de cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Diretórios de ambiente virtual
+venv/
+env/
+ENV/
+
+# Diretórios de logs
+logs/
+
+# Arquivos temporários
+*.tmp
+*.temp
+.DS_Store
+
+# Diretórios de build
+build/
+dist/
+*.egg-info/
+
+# Arquivos de IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Arquivos de saída
+*.json
+*.csv
+*.ris
+!requirements.txt
+!vercel.json 
