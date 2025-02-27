@@ -11,12 +11,14 @@ from functools import lru_cache
 from flask import Flask, render_template, request, jsonify, send_file
 from dotenv import load_dotenv
 
-# Configuração de logging robusta
-log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logs"))
-os.makedirs(log_dir, exist_ok=True)
-
-timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-log_file = os.path.join(log_dir, f"gemini_process_{timestamp}.log")
+# Configuração de logging para ambiente serverless
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s - [RequestID:%(request_id)s]',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
 
 # Formatter personalizado que lida com request_id opcional
 class CustomFormatter(logging.Formatter):
@@ -24,15 +26,6 @@ class CustomFormatter(logging.Formatter):
         if not hasattr(record, 'request_id'):
             record.request_id = 'N/A'  # Valor padrão se request_id não estiver presente
         return super().format(record)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s - [RequestID:%(request_id)s]',
-    handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 
 # Aplicar o formatter personalizado
 for handler in logging.getLogger().handlers:
@@ -279,7 +272,6 @@ Rules:
 
 @app.route('/')
 def index():
-    logger.info("Serving index page", extra={'request_id': 'PAGE_LOAD'})
     return render_template('index.html')
 
 @app.route('/process', methods=['POST'])
@@ -393,9 +385,9 @@ def download(format_type):
         logger.warning(f"Unsupported format: {format_type}", extra={'request_id': request_id})
         return jsonify({'error': 'Unsupported format'}), 400
 
-# Criar diretório de templates se não existir
-templates_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
-os.makedirs(templates_dir, exist_ok=True)
-
 # Definir a pasta de templates para o Flask
-app.template_folder = templates_dir 
+app.template_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+
+# Iniciar o servidor apenas quando executado diretamente (não quando importado pela Vercel)
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000))) 
