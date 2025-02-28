@@ -109,8 +109,17 @@ def pubmed_request(parsed_data, request_id):
             some_value = common_words_list[0]  # This works
 
         # Or simply don't try to index it at all if you don't need to   
-        authors = [author.findtext("LastName") + " " + author.findtext("Initials", "")
-                  for author in article.findall(".//Author")] or parsed_data.get("authors", ["Unknown"])
+        authors = []
+        for author in article.findall(".//Author"):
+            last_name = author.findtext("LastName") or ""
+            initials = author.findtext("Initials") or ""
+            if last_name or initials:  # Se pelo menos um dos dois não for vazio
+                authors.append(f"{last_name} {initials}".strip())
+
+        # Se não encontrar autores, use os dados originais
+        if not authors:
+            authors = parsed_data.get("authors", ["Unknown"])
+        
         journal = article.find(".//Journal/Title")
         journal_title = journal.text if journal is not None and journal.text is not None else parsed_data.get("journal", "")
         year = article.findtext(".//JournalIssue/PubDate/Year") or parsed_data.get("year", "")
