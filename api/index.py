@@ -13,7 +13,7 @@ from io import StringIO
 
 # Configuração de logging simples para ambiente serverless
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Alterado para DEBUG para mais detalhes
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler()]
 )
@@ -110,7 +110,8 @@ Rules:
 - DOI format: 10.xxxx/xxxx
 - URL: https://doi.org/[DOI] if DOI exists
 - Status: "found" or "not_found"
-- Confidence: 0-1 float"""
+- Confidence: 0-1 float
+- Return only valid JSON, no additional text or code blocks"""
 
     def process_single_reference(self, reference, request_id, api_key):
         if not reference.strip():
@@ -130,14 +131,25 @@ Rules:
 
                 if response and 'choices' in response and len(response['choices']) > 0:
                     content = response['choices'][0]['message']['content']
+                    logger.debug(f"[{request_id}] API response content: {content}")  # Log do conteúdo bruto
                     result = extract_json_from_text(content)
 
-                    if result:
-                        result["original_reference"] = reference
-                        if result.get("doi") and not result.get("url"):
-                            result["url"] = f"https://doi.org/{result['doi']}"
-                        logger.info(f"[{request_id}] Successfully processed reference")
-                        return result
+                    if result is None:
+                        logger.warning(f"[{request_id}] Failed to extract JSON from response: {content}")
+                        raise ValueError("No valid JSON extracted from API response")
+
+                    if not isinstance(result, dict):
+                        logger.error(f"[{request_id}] Result is not a dictionary: {result}")
+                        raise TypeError(f"Expected dict, got {type(result).__name__}")
+
+                    result["original_reference"] = reference
+                    if result.get("doi") and not result.get("url"):
+                        result["url"] = f"https://doi.org/{result['doi']}"
+                    logger.info(f"[{request_id}] Successfully processed reference")
+                    return result
+
+                else:
+                    logger.warning(f"[{request_id}] Invalid API response structure: {response}")
 
                 if attempt < self.max_retries:
                     time.sleep(self.retry_delay)
