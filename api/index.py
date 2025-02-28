@@ -79,14 +79,21 @@ def openrouter_request(prompt, api_key, request_id):
 app = Flask(__name__)
 
 def extract_json_from_text(text):
-    """Extrai JSON de texto que pode conter delimitadores de código"""
+    """Extrai JSON de texto que pode conter delimitadores de código ou estar malformado"""
     if not text:
         return None
+    
+    # Remover possíveis delimitadores de código e limpar o texto
+    text = text.strip()
+    text = re.sub(r'```(?:json)?\s*', '', text)  # Remove ```json ou ```
+    text = re.sub(r'```\s*', '', text)          # Remove ```
+    
+    # Tentar encontrar JSON em diferentes formatos
     patterns = [
-        r'```(?:json)?\s*([\s\S]*?)\s*```',
-        r'\{[\s\S]*\}',
-        r'\[\s*\{[\s\S]*\}\s*\]'
+        r'\{[\s\S]*\}',  # Objeto JSON
+        r'$$ \s*\{[\s\S]*\}\s* $$'  # Array de objetos JSON
     ]
+    
     for pattern in patterns:
         matches = re.findall(pattern, text)
         for match in matches:
@@ -94,6 +101,15 @@ def extract_json_from_text(text):
                 return json.loads(match.strip())
             except json.JSONDecodeError:
                 continue
+    
+    # Se falhar, tentar reparar JSON incompleto
+    try:
+        if text and not text.startswith('{'):
+            repaired_text = f'{{"title": "{text}"}}'
+            return json.loads(repaired_text)
+    except json.JSONDecodeError:
+        logger.warning(f"Não foi possível reparar JSON: {text}")
+    
     return None
 
 class ReferenceProcessor:
@@ -138,6 +154,22 @@ Rules:
                             result["url"] = f"https://doi.org/{result['doi']}"
                         logger.info(f"[{request_id}] Successfully processed reference")
                         return result
+                    else:
+                        # Tratar como parcial se não houver JSON válido
+                        return {
+                            "status": "partial",
+                            "title": reference.strip(),
+                            "authors": [],
+                            "year": None,
+                            "journal": None,
+                            "volume": None,
+                            "issue": None,
+                            "pages": None,
+                            "doi": None,
+                            "url": None,
+                            "confidence": 0.5,
+                            "original_reference": reference
+                        }
                 
                 if attempt < self.max_retries:
                     time.sleep(self.retry_delay)
@@ -147,10 +179,13 @@ Rules:
                 if attempt < self.max_retries:
                     time.sleep(self.retry_delay)
         
+        # Fallback para referências parciais ou falhas
         return {
-            "status": "not_found", 
-            "error": "All attempts failed", 
-            "original_reference": reference
+            "status": "not_found",
+            "title": reference.strip() if reference.strip() else None,
+            "error": "All attempts failed",
+            "original_reference": reference,
+            "confidence": 0.0
         }
 
     def process_references(self, references_list, request_id, api_key):
@@ -158,7 +193,6 @@ Rules:
         
         start_time = time.perf_counter()
         
-        # Processar sequencialmente para evitar problemas com concorrência na Vercel
         results = []
         for i, ref in enumerate(references_list):
             if ref.strip():
@@ -178,7 +212,7 @@ Rules:
     def generate_ris_data(self, data):
         output = []
         for item in data:
-            if item.get("status") == "found":
+            if item.get("status") == "found" or item.get("status") == "partial":
                 lines = ["TY  - JOUR"]
                 if item.get("authors"):
                     authors = item["authors"]
@@ -232,24 +266,20 @@ def process():
     request_id = f"REQ_{int(time.time()*1000)}"
     logger.info(f"[{request_id}] New request received")
     
-    # Tentar obter texto da requisição de diferentes formas
     text = None
     api_key = None
     
-    # Verificar se os dados vieram como form-data
     if request.form:
         text = request.form.get('text', '')
         api_key = request.form.get('api_key', '')
         logger.info(f"[{request_id}] Dados recebidos via form-data")
     
-    # Se não encontrou no form, verificar se veio como JSON
     if not text and request.is_json:
         data = request.get_json()
         text = data.get('text', '')
         api_key = data.get('api_key', '')
         logger.info(f"[{request_id}] Dados recebidos via JSON")
     
-    # Se ainda não encontrou, tentar ler os dados brutos
     if not text and request.data:
         try:
             data = json.loads(request.data.decode('utf-8'))
@@ -261,12 +291,11 @@ def process():
     
     if not text:
         logger.warning(f"[{request_id}] Nenhum texto fornecido na requisição")
-        return jsonify({'error': 'Nenhum texto fornecido'}), 400
+        return jsonify({'status': 'error', 'message': 'Nenhum texto fornecido'}), 400
     
-    # Verificar se a chave API foi fornecida
     if not api_key:
         logger.warning(f"[{request_id}] Chave API do OpenRouter não fornecida")
-        return jsonify({'error': 'Chave API do OpenRouter não fornecida. Por favor, forneça sua chave API.'}), 400
+        return jsonify({'status': 'error', 'message': 'Chave API do OpenRouter não fornecida'}), 400
     
     logger.info(f"[{request_id}] Texto recebido com {len(text)} caracteres")
     
@@ -276,15 +305,12 @@ def process():
     processor = ReferenceProcessor()
     
     try:
-        # Processar referências
         results, processing_time = processor.process_references(references, request_id, api_key)
         
-        # Gerar dados em memória em vez de arquivos
         json_data = processor.generate_json_data(results)
         ris_data = processor.generate_ris_data(results)
         csv_data = processor.generate_csv_data(results)
         
-        # Codificar dados para download
         encoded_data = {
             'json': base64.b64encode(json_data.encode('utf-8')).decode('utf-8'),
             'ris': base64.b64encode(ris_data.encode('utf-8')).decode('utf-8'),
@@ -307,7 +333,7 @@ def process():
     
     except Exception as e:
         logger.error(f"[{request_id}] Processing failed: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/download/<format_type>')
 def download(format_type):
@@ -320,10 +346,8 @@ def download(format_type):
         return jsonify({'error': 'No data provided'}), 400
     
     try:
-        # Decodificar dados
         decoded_data = base64.b64decode(encoded_data).decode('utf-8')
         
-        # Configurar tipo de conteúdo e nome do arquivo
         content_types = {
             'json': ('application/json', 'references.json'),
             'ris': ('application/x-research-info-systems', 'references.ris'),
@@ -334,7 +358,6 @@ def download(format_type):
             logger.warning(f"[{request_id}] Unsupported format: {format_type}")
             return jsonify({'error': 'Unsupported format'}), 400
         
-        # Criar resposta com os dados
         content_type, filename = content_types[format_type]
         
         response = Response(decoded_data)
@@ -348,9 +371,7 @@ def download(format_type):
         logger.error(f"[{request_id}] Download failed: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-# Definir a pasta de templates para o Flask
 app.template_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
 
-# Iniciar o servidor apenas quando executado diretamente (não quando importado pela Vercel)
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000))) 
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
