@@ -112,7 +112,7 @@ def pubmed_request(parsed_data, request_id):
         authors = [author.findtext("LastName") + " " + author.findtext("Initials", "")
                   for author in article.findall(".//Author")] or parsed_data.get("authors", ["Unknown"])
         journal = article.find(".//Journal/Title")
-        journal_title = journal.text if journal is not None else parsed_data.get("journal", "")
+        journal_title = journal.text if journal is not None and journal.text is not None else parsed_data.get("journal", "")
         year = article.findtext(".//JournalIssue/PubDate/Year") or parsed_data.get("year", "")
         volume = article.findtext(".//JournalIssue/Volume") or parsed_data.get("volume", "")
         issue = article.findtext(".//JournalIssue/Issue") or parsed_data.get("issue", "")
